@@ -1,0 +1,8 @@
+paho-mqtt
+uplink
+marshmallow-dataclass
+munch
+inflection
+marshmallow_enum
+PyOpenSSL
+deepmerge

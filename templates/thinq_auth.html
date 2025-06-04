@@ -1,0 +1,16 @@
+{% extends "layouts/module_admin.html" %}
+{% block breadcrumb %}
+<li class="breadcrumb-item"><a href="ThinQ">LG ThinQ</a></li>
+{% endblock %}
+{% block module %}
+
+<h1>Auth LG ThinQ</h1>
+<p>Log in here:</p>
+<p><a href="{{ login_url }}" target="_blank">{{ login_url }}</a></p>
+<p>Then paste the URL to which the browser is redirected:</p>
+<form action="?" method="GET">
+    <input class="form-control" type="text" name="url" placeholder="Paste URL" required>
+    <input type="text" name="op" value="oauth_verifier" hidden>
+    <button class="btn btn-primary mt-2" type="submit">Send</button>
+</form>
+{% endblock %}
