@@ -38,13 +38,20 @@ class ThinQMQTT:
     def on_message(self, client, userdata, msg):
         self._on_message(client, userdata, msg)
 
-    def on_connect(self, client, userdata, flags, rc):
-        for topic in self.registration.subscriptions:
-            client.subscribe(topic, 1)
-
     def on_device_message(self, message):
         pass
 
+    def on_connect(self, client, userdata, flags, rc):
+        pass
+
+    def on_disconnect(self, client, userdata, rc):
+        pass
+
+    def _on_connect(self, client, userdata, flags, rc):
+        for topic in self.registration.subscriptions:
+            client.subscribe(topic, 1)
+        self.on_connect(client, userdata, flags, rc)
+    
     def _on_message(self, client, userdata, msg):
         # XXX - nastiness
         message = None
@@ -59,7 +66,8 @@ class ThinQMQTT:
     def client(self):
         client = Client(mqtt.CallbackAPIVersion.VERSION1, client_id=self._auth.client_id)
         client.tls_set_context(self.ssl_context)
-        client.on_connect = self.on_connect
+        client.on_connect = self._on_connect
+        client.on_disconnect = self.on_disconnect
         client.on_message = self.on_message
         return client
 

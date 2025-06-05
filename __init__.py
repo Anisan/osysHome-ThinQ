@@ -8,6 +8,7 @@ from app.database import row2dict, get_now_to_utc
 from app.core.main.BasePlugin import BasePlugin
 from app.core.lib.object import callMethodThread, updatePropertyThread, setLinkToObject, removeLinkFromObject
 from app.core.lib.cache import findInCache, getFullFilename
+from app.core.lib.common import addNotify, CategoryNotify
 from plugins.ThinQ.models.ThinqDevices import ThinqDevices
 from plugins.ThinQ.models.ThinqStates import ThinqStates
 from plugins.ThinQ.thinq2.controller.auth import ThinQAuth
@@ -26,10 +27,14 @@ class ThinQ(BasePlugin):
         self.category = "Devices"
         self.actions = ['cycle','search']
         self._client = None
+        self.is_connect = False
         self.auth = None
         self.cache_devices = {}
 
     def initialization(self):
+        self.connect_thinq()
+
+    def connect_thinq(self):
         try:
             token_file = findInCache("thinq.json", self.name)
             if token_file:
@@ -38,6 +43,8 @@ class ThinQ(BasePlugin):
                     config = json.load(f)
                     self._client = ThinQClient(config)
                 # Назначаем функции обратного вызова
+                self._client.mqtt.on_connect = self.on_connect
+                self._client.mqtt.on_disconnect = self.on_disconnect
                 self._client.mqtt.on_message = self.on_message
                 # self._client.mqtt.on_device_message = self.on_device_message
                 # Подключаемся к брокеру MQTT
@@ -64,43 +71,9 @@ class ThinQ(BasePlugin):
                 return redirect("ThinQ")
 
         if op == "update":
-            self.logger.debug("Get devices")
             if not self._client:
                 return redirect("ThinQ?op=auth")
-
-            devices = self._client.mqtt.thinq_client.get_devices()
-
-            if len(devices.items) == 0:
-                self.logger.info("No devices found!")
-                self.logger.info("If you are using ThinQ v1 devices, try https://github.com/sampsyo/wideq")
-                return redirect("ThinQ")
-
-            with session_scope() as session:
-
-                for device in devices.items:
-                    self.logger.debug("{}: {} (model {})".format(device.device_id, device.alias, device.model_name))
-                    rec = session.query(ThinqDevices).filter(ThinqDevices.uuid == device.device_id).one_or_none()
-                    if not rec:
-                        rec = ThinqDevices()
-                        rec.uuid = device.device_id
-                        session.add(rec)
-                    rec.alias = device.alias
-                    rec.device_type = device.device_type
-                    rec.model_name = device.model_name
-                    rec.model_protocol = device.model_protocol
-                    rec.online = device.online
-                    rec.updated = get_now_to_utc()
-                    rec.image = device.image_url
-                    session.commit()
-
-                    try:
-                        self.logger.debug(device)
-                        state = device.snapshot.state
-                        self.logger.debug(state)
-                        for key, value in device.snapshot.state.items():
-                            self.updateValue(session, key, value, rec.id)
-                    except Exception as error:
-                        self.logger.error("Error: " + str(error))
+            self.updateDevices()
             return redirect("ThinQ")
 
         if op == 'oauth_verifier':
@@ -113,7 +86,7 @@ class ThinQ(BasePlugin):
                 with open(file_path, "w") as f:
                     json.dump(vars(thinq), f)
                 self.auth = None
-                self.initialization()
+                self.connect_thinq()
             except Exception as ex:
                 self.logger.exception(ex)
             return redirect("ThinQ")
@@ -172,13 +145,53 @@ class ThinQ(BasePlugin):
 
     def cyclic_task(self):
         if self.event.is_set():
-            # Отключаемся от брокера MQTT
-            self._client.mqtt.disconnect()
-            # Останавливаем цикл обработки сообщений
-            self._client.mqtt.loop_stop()
-            self._client = None
+            pass
         else:
-            self.event.wait(1.0)
+            if self._client:
+                if not self.is_connect:
+                    self._client.mqtt.connect()
+                    self._client.mqtt.loop_start()
+                    self.updateDevices()
+            #else:
+
+            self.event.wait(5.0)
+
+    def updateDevices(self):
+        self.logger.debug("Get devices")
+        if not self._client:
+            return
+
+        devices = self._client.mqtt.thinq_client.get_devices()
+
+        if len(devices.items) == 0:
+            self.logger.info("No devices found!")
+            return
+
+        with session_scope() as session:
+            for device in devices.items:
+                self.logger.debug("{}: {} (model {})".format(device.device_id, device.alias, device.model_name))
+                rec = session.query(ThinqDevices).filter(ThinqDevices.uuid == device.device_id).one_or_none()
+                if not rec:
+                    rec = ThinqDevices()
+                    rec.uuid = device.device_id
+                    session.add(rec)
+                rec.alias = device.alias
+                rec.device_type = device.device_type
+                rec.model_name = device.model_name
+                rec.model_protocol = device.model_protocol
+                rec.online = device.online
+                rec.updated = get_now_to_utc()
+                rec.image = device.image_url
+                session.commit()
+
+                try:
+                    self.logger.debug(device)
+                    state = device.snapshot.state
+                    self.logger.debug(state)
+                    for key, value in device.snapshot.state.items():
+                        self.updateValue(session, key, value, rec.id)
+                except Exception as error:
+                    self.logger.error("Error: " + str(error))
 
     def mqttPublish(self, topic, value, qos=0, retain=False):
         self.logger.debug("Pubs: %s - %s",topic,value)
@@ -191,6 +204,27 @@ class ThinQ(BasePlugin):
                 removeLinkFromObject(obj, prop, self.name)
                 return
         return
+
+    # Функция обратного вызова для подключения к брокеру MQTT
+    def on_connect(self,client, userdata, flags, rc):
+        self.logger.info("Connected with result code " + str(rc))
+        self.is_connect = True
+
+    def on_disconnect(self, client, userdata, rc):
+        self.is_connect = False
+        addNotify("Disconnect MQTT",str(rc),CategoryNotify.Error,self.name)
+        if rc == 0:
+            self.logger.info("Disconnected gracefully.")
+        elif rc == 1:
+            self.logger.info("Client requested disconnection.")
+        elif rc == 2:
+            self.logger.info("Broker disconnected the client unexpectedly.")
+        elif rc == 3:
+            self.logger.info("Client exceeded timeout for inactivity.")
+        elif rc == 4:
+            self.logger.info("Broker closed the connection.")
+        else:
+            self.logger.warning("Unexpected disconnection with code: %s", rc)
 
     def on_device_message(self, message):
         self.logger.debug("Action: %s", str(message))
