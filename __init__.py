@@ -46,6 +46,7 @@ class ThinQ(BasePlugin):
                 self._client.mqtt.on_connect = self.on_connect
                 self._client.mqtt.on_disconnect = self.on_disconnect
                 self._client.mqtt.on_message = self.on_message
+                self._client.mqtt.on_log = self.on_log
                 # self._client.mqtt.on_device_message = self.on_device_message
                 # Подключаемся к брокеру MQTT
                 self._client.mqtt.connect()
@@ -149,10 +150,7 @@ class ThinQ(BasePlugin):
         else:
             if self._client:
                 if not self.is_connect:
-                    self._client.mqtt.connect()
-                    self._client.mqtt.loop_start()
                     self.updateDevices()
-            #else:
 
             self.event.wait(5.0)
 
@@ -206,11 +204,11 @@ class ThinQ(BasePlugin):
         return
 
     # Функция обратного вызова для подключения к брокеру MQTT
-    def on_connect(self,client, userdata, flags, rc):
+    def on_connect(self,client, userdata, flags, rc, properties):
         self.logger.info("Connected with result code " + str(rc))
         self.is_connect = True
 
-    def on_disconnect(self, client, userdata, rc):
+    def on_disconnect(self, client, userdata, disconnect_flags, rc, properties):
         self.is_connect = False
         addNotify("Disconnect MQTT",str(rc),CategoryNotify.Error,self.name)
         if rc == 0:
@@ -225,6 +223,17 @@ class ThinQ(BasePlugin):
             self.logger.info("Broker closed the connection.")
         else:
             self.logger.warning("Unexpected disconnection with code: %s", rc)
+
+    def on_log(self, client, userdata, level, buf):
+        import paho.mqtt.client as mqtt
+        if level == mqtt.MQTT_LOG_ERR:
+            self.logger.error(f"MQTT Error: {buf}")
+        elif level == mqtt.MQTT_LOG_WARNING:
+            self.logger.warning(f"MQTT Warning: {buf}")
+        elif level == mqtt.MQTT_LOG_NOTICE:
+            self.logger.info(f"MQTT Notice: {buf}")
+        else:
+            self.logger.debug(f"MQTT Debug: {buf}")
 
     def on_device_message(self, message):
         self.logger.debug("Action: %s", str(message))

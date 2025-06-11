@@ -1,5 +1,6 @@
 import requests
 import ssl
+import time
 from urllib.parse import urlparse
 
 from OpenSSL import crypto
@@ -25,7 +26,7 @@ class ThinQMQTT:
     def connect(self):
         if not self.client.is_connected():
             endpoint = urlparse(self.route.mqtt_server)
-            self.client.connect(endpoint.hostname, endpoint.port)
+            self.client.connect(endpoint.hostname, endpoint.port,keepalive=60)
 
     def loop_start(self):
         self.connect()
@@ -44,13 +45,20 @@ class ThinQMQTT:
     def on_connect(self, client, userdata, flags, rc):
         pass
 
-    def on_disconnect(self, client, userdata, rc):
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         pass
 
-    def _on_connect(self, client, userdata, flags, rc):
+    def on_log(self, client, userdata, level, buf):
+        pass
+
+    def _on_connect(self, client, userdata, flags, rc, properties):
         for topic in self.registration.subscriptions:
             client.subscribe(topic, 1)
-        self.on_connect(client, userdata, flags, rc)
+        self.on_connect(client, userdata, flags, rc, properties)
+
+    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        self._schedule_reconnect()
+        self.on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties)
     
     def _on_message(self, client, userdata, msg):
         # XXX - nastiness
@@ -61,14 +69,27 @@ class ThinQMQTT:
             print("Can't parse MQTT message:", e)
         self.on_device_message(message)
 
+    def _schedule_reconnect(self):
+        delay = 10
+
+        time.sleep(delay)
+        self._reconnect()
+
+    def _reconnect(self):
+        try:
+            self.client.reconnect()
+        except Exception as e:
+            self._schedule_reconnect()
+
     @property
     @memoize
     def client(self):
-        client = Client(mqtt.CallbackAPIVersion.VERSION1, client_id=self._auth.client_id)
+        client = Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self._auth.client_id, clean_session=False)
         client.tls_set_context(self.ssl_context)
         client.on_connect = self._on_connect
-        client.on_disconnect = self.on_disconnect
+        client.on_disconnect = self._on_disconnect
         client.on_message = self.on_message
+        client.on_log = self.on_log
         return client
 
     @property
@@ -90,7 +111,7 @@ class ThinQMQTT:
         #context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         context = ssl.create_default_context()
         context.set_alpn_protocols([AWS_IOTT_ALPN_PROTOCOL])
-        context.check_hostname = False
+        context.check_hostname = True
         context.load_verify_locations(cafile=ca_cert_path)
         context.load_cert_chain(certfile=client_cert_path, keyfile=private_key_path)
 
@@ -110,8 +131,8 @@ class ThinQMQTT:
     def csr(self):
         key = crypto.load_privatekey(FILETYPE_PEM, self.private_key)
         csr = crypto.X509Req()
-        csr.get_subject().CN = "AWS IoT Certificate"
-        csr.get_subject().O = "Amazon"
+        csr.get_subject().CN = "lg_thinq"
+        #csr.get_subject().O = "Amazon"
         csr.set_pubkey(key)
         csr.sign(key, "sha256")
         return str(crypto.dump_certificate_request(FILETYPE_PEM, csr), "utf8")
