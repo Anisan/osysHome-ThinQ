@@ -181,10 +181,9 @@ class ThinQ(BasePlugin):
                         self.updateValue(session, "online", True, rec.id)
 
                     except ThinQAPIException as ex:
-                        if ex.code == 1222:  # NOT_CONNECTED_DEVICE
+                        if ex.code == '1222':  # NOT_CONNECTED_DEVICE
                             self.updateValue(session, "online", False, rec.id)
                     except Exception as ex:
-                        self.updateValue(session, "online", False, rec.id)
                         self.logger.exception(ex)
 
                     session.commit()
