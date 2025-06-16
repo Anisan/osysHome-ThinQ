@@ -15,7 +15,7 @@
         </div>
         <div class="input-group mb-3">
             <span class="input-group-text" id="inputGroup-sizing-sm">
-                <img :src="device.image" height="30px" onError="this.src='/ThinQ/static/ThinQ.png'"/>
+                <img :src="'/ThinQ/static/types/' +device.device_type + '.png'" height="30px" onError="this.src='/ThinQ/static/ThinQ.png'"/>
             </span>
             <span class="input-group-text" id="inputGroup-sizing-sm">Type</span>
             <input type="text" class="form-control" id="name" readonly v-model="device.device_type">

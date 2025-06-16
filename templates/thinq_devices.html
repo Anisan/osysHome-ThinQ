@@ -4,12 +4,40 @@
 <li class="breadcrumb-item"><a href="ThinQ">LG ThinQ</a></li>
 {% endblock %}
 {% block module %}
-<a href="?op=update" class="btn btn-primary">
-    Update
-</a>
-<a href="?op=auth" class="btn btn-info">
-    Authorization
-</a>
+<button type="button" class="btn btn-primary text-nowrap" data-bs-toggle="modal" data-bs-target="#exampleModal">
+    <span class="fas fa-gear me-2"></span>
+    {{ _('Settings')}}
+</button>
+ <!-- Модальное окно с настройками -->
+ <div class="modal fade" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form  method="POST">
+            <div class="modal-header">
+                <h5 class="modal-title" id="exampleModalLabel">{{ _('Settings')}}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Поля формы -->
+                {{ form.hidden_tag() }}
+                <div class="mb-3">
+                    <label class="form-label">{{ _('API key') }}</label>
+                    {{ form.api_key(class="form-control") }}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">{{ _('Country') }}</label>
+                    {{ form.country(class="form-control") }}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Close')}}</button>
+                <button type="submit" class="btn btn-primary">{{ _('Submit')}}</button>
+            </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <div class="table-responsive">
     <table class="table table-hover table-striped">
         <thead>
@@ -24,7 +52,7 @@
             {% for device in devices %}
             <tr>
                 <td class="py-1">
-                    <img src="{{ device.image }}" height="50px" onError="this.src='/ThinQ/static/ThinQ.png'">
+                    <img src="/ThinQ/static/types/{{ device.device_type }}.png" height="50px" onError="this.src='/ThinQ/static/ThinQ.png'">
                     <a href="?op=edit&device={{device.id}}">{{ device.alias }}</a>
                 </td>
                 <td class="py-1">
