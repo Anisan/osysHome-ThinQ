@@ -1,3 +1,15 @@
+"""
+API key
+
+1. Visit the website: https://connect-pat.lgthinq.com
+2. Log in on the ThinQ account.
+3. Select the "ADD NEW TOkEN" button.
+4. Enter Token name.
+5. Select a feature you want.
+6. Select the "CREATE TOKEN" button, and the token will be created. You will then be redirected to the PAT page.
+7. Copy the newly generated token for use.
+"""
+
 import json
 from flask import redirect, render_template, request, jsonify
 from sqlalchemy import or_
@@ -164,21 +176,7 @@ class ThinQ(BasePlugin):
                     try:
                         status = await self.client.async_get_device_status(device['deviceId'])
                         self.logger.info("status : %s", status)
-                        rec.online = True
-
-                        for name, prop in status.items():
-                            if isinstance(prop, list):
-                                for item in prop:
-                                    loc = item['locationName']
-                                    for key,value in item.items():
-                                        if key != 'locationName':
-                                            self.updateValue(session, f"{name}_{loc}_{key}", value, rec.id)
-
-                            if isinstance(prop, dict):
-                                for key,value in prop.items():
-                                    self.updateValue(session, f"{name}_{key}", value, rec.id)
-
-                        self.updateValue(session, "online", True, rec.id)
+                        rec.online = self.processData(session, status, rec.id)
 
                     except ThinQAPIException as ex:
                         if ex.code == '1222':  # NOT_CONNECTED_DEVICE
@@ -320,7 +318,27 @@ class ThinQ(BasePlugin):
             if len(properties) == 0:
                 removeLinkFromObject(obj, prop, self.name)
                 return
+            # todo send_command
         return
+
+    async def send_command_async(self, device_id, payload):
+        """Async метод для отправки команд устройству"""
+        if not self.client:
+            raise Exception("Client not initialized")
+
+        return await self.client.async_post_device_control(device_id=device_id, payload=payload)
+
+    def send_command(self, device_id, payload):
+        """Синхронная обертка для async команд"""
+        if not self.loop:
+            return None
+
+        future = asyncio.run_coroutine_threadsafe(
+            self.send_command_async(device_id, payload),
+            self.loop
+        )
+
+        return future.result(timeout=10)
 
     def _on_connection_interrupted(self, connection, error, **kwargs):
         self.logger.error(f"Соединение прервано. Ошибка: {error}")
@@ -351,27 +369,44 @@ class ThinQ(BasePlugin):
         try:
             self.logger.debug(f"on_message_received: {topic}, {payload}")
             data = json.loads(payload)
-            device_id = data.get('deviceId')
-            props = data.get('report')
+            uuid = data.get('deviceId')
             with session_scope() as session:
-                rec = session.query(ThinqDevices).filter(ThinqDevices.uuid == device_id).one_or_none()
+                rec = session.query(ThinqDevices).filter(ThinqDevices.uuid == uuid).one_or_none()
                 if not rec:
                     return
-                for name, prop in props.items():
-                    if isinstance(prop, list):
-                        for item in prop:
-                            loc = item['locationName']
-                            for key,value in item.items():
-                                if key != 'locationName':
-                                    self.updateValue(session, f"{name}_{loc}_{key}", value, rec.id)
-
-                    if isinstance(prop, dict):
-                        for key,value in prop.items():
-                            self.updateValue(session, f"{name}_{key}", value, rec.id)
-
-                self.updateValue(session, "online", True, rec.id)
+                pushType = data.get("pushType")
+                if pushType == "DEVICE_STATUS":
+                    props = data.get('report')
+                    if props:
+                        rec.online = self.processData(session, props, rec.id)
+                if pushType == "DEVICE_PUSH":
+                    self.updateValue(session, "DEVICE_PUSH", data.get("pushpushCodeype"), rec.id)
+                session.commit()
         except Exception as e:
             self.logger.exception(f"Error processing state: {e}")
+
+    def processData(self, session, data, device_id):
+        online = True
+        if isinstance(data, list):
+            data = data[0]
+        for name, prop in data.items():
+            if isinstance(prop, list):
+                for item in prop:
+                    loc = item['locationName']
+                    for key,value in item.items():
+                        if key != 'locationName':
+                            self.updateValue(session, f"{name}_{loc}_{key}", value, device_id)
+                        if value == 'POWER_OFF':
+                            online = False
+
+            if isinstance(prop, dict):
+                for key,value in prop.items():
+                    self.updateValue(session, f"{name}_{key}", value, device_id)
+                    if value == 'POWER_OFF':
+                        online = False
+
+        self.updateValue(session, "online", online, device_id)
+        return online
 
     def updateValue(self, session, key, value, device_id):
         state = session.query(ThinqStates).filter(ThinqStates.title == key,ThinqStates.device_id == device_id).one_or_none()
@@ -387,14 +422,14 @@ class ThinQ(BasePlugin):
             linked_object_property = f"{state.linked_object}.{state.linked_property}"
             updatePropertyThread(linked_object_property, new_value, self.name)
 
-        if new_value != old_value:
-            state.value = new_value
+        if str(new_value) != str(old_value) or state.linked_method:
+            state.value = str(new_value)
             state.updated = get_now_to_utc()
             session.commit()
 
         if new_value != old_value and state.linked_object and state.linked_method:
             method_params = {
-                "NEW_VALUE": new_value,
+                "NEW_VALUE": str(new_value),
                 "OLD_VALUE": old_value,
                 "UPDATED": state.updated,
                 "MODULE": self.name,
