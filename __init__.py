@@ -175,7 +175,7 @@ class ThinQ(BasePlugin):
 
                     try:
                         status = await self.client.async_get_device_status(device['deviceId'])
-                        self.logger.info("status : %s", status)
+                        self.logger.debug("status : %s", status)
                         rec.online = self.processData(session, status, rec.id)
 
                     except ThinQAPIException as ex:
